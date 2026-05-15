@@ -1,0 +1,27 @@
+{
+	"name": "@omggga/rfmo",
+	"version": "0.1.0",
+	"description": "RFMO API client example for Node.js via an mTLS tunnel",
+	"type": "module",
+	"private": false,
+	"main": "./src/index.js",
+	"exports": {
+		".": "./src/index.js"
+	},
+	"files": [
+		"src",
+		"README.md",
+		"LICENSE"
+	],
+	"scripts": {
+		"start": "node src/cli.js",
+		"test": "node --test",
+		"check": "node --check src/*.js test/*.test.js"
+	},
+	"engines": {
+		"node": "24.15.0"
+	},
+	"volta": {
+		"node": "24.15.0"
+	}
+}
