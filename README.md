@@ -19,6 +19,9 @@ Use this mTLS gateway example:
 
 https://github.com/omggga/mtls
 
+The implementation was checked against RFMO user guide version `1.2`
+dated `28.08.2025` for NFO/NKO service users.
+
 ## Architecture
 
 ```text
@@ -56,6 +59,7 @@ RFMO_MTLS_HOST=localhost
 RFMO_MTLS_PORT=3010
 RFMO_MTLS_PATH=/rfmo
 
+RFMO_CONTOUR=prod
 RFMO_API_TIMEOUT_MS=60000
 RFMO_API_RETRY_ATTEMPTS=2
 RFMO_CAPTURE_ENVELOPES=0
@@ -75,12 +79,29 @@ node --env-file=.env src/cli.js mvk-catalog
 node --env-file=.env src/cli.js un-catalog
 ```
 
+For the test contour, set `RFMO_CONTOUR=test`. The client will call
+`test-contur/...` methods and keep a separate cached JWT token:
+
+```bash
+RFMO_CONTOUR=test node --env-file=.env src/cli.js te2-catalog
+```
+
 Download methods require `idXml` from the corresponding catalog response:
 
 ```bash
+node --env-file=.env src/cli.js te2-file "<idXml>" te2-file.zip
 node --env-file=.env src/cli.js te21-file "<idXml>" te21-file.zip
 node --env-file=.env src/cli.js mvk-file-zip "<idXml>" mvk-file.zip
 node --env-file=.env src/cli.js un-file "<idXml>" un-file.xml
+```
+
+Formalized message calls:
+
+```bash
+node --env-file=.env src/cli.js send-message message.xml message.sig
+node --env-file=.env src/cli.js send-message-with-mchd message.xml message.sig mchd.xml mchd.sig
+node --env-file=.env src/cli.js check-status "<IdFormalizedMessage>" "<IdExternal>"
+node --env-file=.env src/cli.js get-ticket "<IdFormalizedMessage>" "<IdExternal>" ticket.bin
 ```
 
 ## Run With Docker
@@ -113,12 +134,38 @@ const catalog = await api.getCurrentTe21Catalog()
 const fileZip = await api.getTe21File(catalog.idXml)
 ```
 
+Test contour:
+
+```js
+const api = new RfmoApi({ contour: 'test' })
+
+const catalog = await api.getCurrentTe2Catalog()
+const fileZip = await api.getTe2File(catalog.idXml)
+```
+
+Formalized messages:
+
+```js
+import { promises as fs } from 'node:fs'
+
+const result = await api.sendFormalizedMessage({
+  file: { data: await fs.readFile('message.xml'), filename: 'message.xml' },
+  sign: { data: await fs.readFile('message.sig'), filename: 'message.sig' }
+})
+
+const status = await api.checkFormalizedMessageStatus({
+  IdFormalizedMessage: result.IdFormalizedMessage,
+  IdExternal: result.IdExternal
+})
+```
+
 You can also pass config directly instead of using environment variables:
 
 ```js
 import { RfmoApi } from './src/index.js'
 
 const api = new RfmoApi({
+  contour: 'prod',
   rfmo: {
     protocol: 'http',
     host: 'localhost',
@@ -137,6 +184,8 @@ const api = new RfmoApi({
 | Method | RFMO path | Result |
 | --- | --- | --- |
 | `authenticate()` | `authenticate` | JWT access token |
+| `getCurrentTe2Catalog()` | `suspect-catalogs/current-te2-catalog` | legacy/test catalog JSON |
+| `getTe2File(idXml)` | `suspect-catalogs/current-te2-file` | `Buffer` with ZIP payload |
 | `getCurrentTe21Catalog()` | `suspect-catalogs/current-te21-catalog` | catalog JSON |
 | `getTe21File(idXml)` | `suspect-catalogs/current-te21-file` | `Buffer` with ZIP payload |
 | `getCurrentMvkCatalog()` | `suspect-catalogs/current-mvk-catalog` | catalog JSON |
@@ -144,9 +193,16 @@ const api = new RfmoApi({
 | `getCurrentUnCatalog()` | `suspect-catalogs/current-un-catalog` | catalog JSON |
 | `getCurrentUnCatalogRus()` | `suspect-catalogs/current-un-catalog-rus` | catalog JSON |
 | `getUnFile(idXml)` | `suspect-catalogs/current-un-file` | `Buffer` with XML payload |
+| `sendFormalizedMessage({ file, sign })` | `formalized-message/send` | registration JSON |
+| `sendFormalizedMessageWithMchd({ file, sign, mchd, mchdSign })` | `formalized-message/send-with-mchd` | registration JSON |
+| `checkFormalizedMessageStatus(ref)` | `formalized-message/check-status` | status JSON |
+| `getFormalizedMessageTicket(ref)` | `formalized-message/get-ticket` | `Buffer` with ticket payload |
 
 Catalog responses are normalized so `Date`, `IdXml`, and `IsActive` are also
 available as `date`, `idXml`, and `isActive`.
+
+When `contour: 'test'` or `RFMO_CONTOUR=test` is used, method paths are prefixed
+with `test-contur/`.
 
 ## Envelope Capture
 

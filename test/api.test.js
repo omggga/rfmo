@@ -42,6 +42,31 @@ describe('RfmoApi', () => {
 		assert.equal(calls[0].options.headers.Authorization, 'Bearer cached-token')
 	})
 
+	it('uses test-contur prefix and separate cache key in test contour', async () => {
+		const cache = new Map()
+		const calls = []
+		const api = new RfmoApi({
+			cache,
+			contour: 'test',
+			rfmo: baseConfig(),
+			requestFn: async (url, options) => {
+				calls.push({ url, options })
+				if (url.endsWith('/test-contur/authenticate')) {
+					return jsonResponse({ value: { accessToken: 'test-token' } })
+				}
+				return jsonResponse({ idXml: 'te2-id' })
+			}
+		})
+
+		const catalog = await api.getCurrentTe2Catalog()
+
+		assert.equal(catalog.idXml, 'te2-id')
+		assert.equal(cache.get('rfmo:auth:token:test-contur'), 'test-token')
+		assert.equal(calls[0].url, 'http://gateway:3010/rfmo/test-contur/authenticate')
+		assert.equal(calls[1].url, 'http://gateway:3010/rfmo/test-contur/suspect-catalogs/current-te2-catalog')
+		assert.equal(calls[1].options.headers.Authorization, 'Bearer test-token')
+	})
+
 	it('re-authenticates once on 401 and repeats original call', async () => {
 		const seen = []
 		const api = new RfmoApi({
@@ -80,6 +105,78 @@ describe('RfmoApi', () => {
 
 		const file = await api.getMvkFileZip({ id: 'xml-id' })
 		assert.equal(file.toString('utf8'), 'zip-data')
+	})
+
+	it('sends formalized message as multipart form data', async () => {
+		const api = new RfmoApi({
+			rfmo: baseConfig(),
+			token: 'token',
+			requestFn: async (url, options) => {
+				assert.equal(url, 'http://gateway:3010/rfmo/formalized-message/send')
+				assert.ok(options.body instanceof FormData)
+				assert.equal(options.headers['Content-Type'], undefined)
+				assert.equal(options.headers.Authorization, 'Bearer token')
+				assert.ok(options.body.get('file') instanceof Blob)
+				assert.ok(options.body.get('sign') instanceof Blob)
+				return jsonResponse({ IdFormalizedMessage: 'message-id', IdExternal: 'external-id' })
+			}
+		})
+
+		const result = await api.sendFormalizedMessage({
+			file: { data: Buffer.from('<xml/>'), filename: 'message.xml', contentType: 'application/xml' },
+			sign: { data: Buffer.from('sign'), filename: 'message.sig' }
+		})
+
+		assert.equal(result.IdFormalizedMessage, 'message-id')
+	})
+
+	it('sends formalized message with mchd files', async () => {
+		const api = new RfmoApi({
+			rfmo: baseConfig(),
+			token: 'token',
+			requestFn: async (url, options) => {
+				assert.equal(url, 'http://gateway:3010/rfmo/formalized-message/send-with-mchd')
+				assert.ok(options.body.get('mchd') instanceof Blob)
+				assert.ok(options.body.get('mchdSign') instanceof Blob)
+				return jsonResponse({ IdFormalizedMessage: 'message-id' })
+			}
+		})
+
+		await api.sendFormalizedMessageWithMchd({
+			file: Buffer.from('<xml/>'),
+			sign: Buffer.from('sign'),
+			mchd: [Buffer.from('<mchd/>')],
+			mchdSign: [Buffer.from('mchd-sign')]
+		})
+	})
+
+	it('checks formalized message status and downloads ticket', async () => {
+		const calls = []
+		const api = new RfmoApi({
+			rfmo: baseConfig(),
+			token: 'token',
+			requestFn: async (url, options) => {
+				calls.push({ url, options })
+				if (url.endsWith('/check-status')) {
+					return jsonResponse({ IdFormalizedMessageStatus: 3 })
+				}
+				return new Response(Buffer.from('ticket'), { status: 200, statusText: 'OK' })
+			}
+		})
+
+		const status = await api.checkFormalizedMessageStatus({
+			idFormalizedMessage: 'message-id',
+			idExternal: 'external-id'
+		})
+		const ticket = await api.getFormalizedMessageTicket({
+			IdFormalizedMessage: 'message-id',
+			IdExternal: 'external-id'
+		})
+
+		assert.equal(status.IdFormalizedMessageStatus, 3)
+		assert.equal(ticket.toString('utf8'), 'ticket')
+		assert.equal(calls[0].options.body, '{"IdFormalizedMessage":"message-id","IdExternal":"external-id"}')
+		assert.equal(calls[1].options.body, '{"IdFormalizedMessage":"message-id","IdExternal":"external-id"}')
 	})
 
 	it('does not retry usage errors', async () => {

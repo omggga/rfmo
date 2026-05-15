@@ -5,6 +5,25 @@ import { RfmoApiHttpError, RfmoApiUsageError } from './errors.js'
 
 const TOKEN_CACHE_KEY = 'rfmo:auth:token'
 
+function buildTokenCacheKey(contour = 'prod') {
+	const normalized = normalizeContour(contour)
+	return normalized === 'test' ? `${TOKEN_CACHE_KEY}:test-contur` : TOKEN_CACHE_KEY
+}
+
+function normalizeContour(contour = 'prod') {
+	const value = String(contour || 'prod').trim().toLowerCase()
+	if (['test', 'test-contur', 'test_contur'].includes(value)) return 'test'
+	return 'prod'
+}
+
+function buildMethodPath(methodPath, contour = 'prod') {
+	const cleanPath = String(methodPath || '').replace(/^\/+/, '')
+	if (normalizeContour(contour) !== 'test' || cleanPath.startsWith('test-contur/')) {
+		return cleanPath
+	}
+	return `test-contur/${cleanPath}`
+}
+
 async function request(url, opts = {}, timeoutMs = 60_000) {
 	const options = { method: 'GET', headers: {}, ...opts }
 	let timeoutId
@@ -126,6 +145,86 @@ function normalizeId(value) {
 	}
 
 	return null
+}
+
+function buildFormalizedMessageForm({ file, sign, mchd = [], mchdSign = [] } = {}) {
+	if (!file) {
+		throw new RfmoApiUsageError('formalized-message/send requires file')
+	}
+	if (!sign) {
+		throw new RfmoApiUsageError('formalized-message/send requires sign')
+	}
+
+	const form = new FormData()
+	appendBinaryFormPart(form, 'file', file, 'message.xml')
+	appendBinaryFormPart(form, 'sign', sign, 'message.sig')
+
+	for (const [index, item] of asArray(mchd).entries()) {
+		appendBinaryFormPart(form, 'mchd', item, `mchd-${index + 1}.xml`)
+	}
+	for (const [index, item] of asArray(mchdSign).entries()) {
+		appendBinaryFormPart(form, 'mchdSign', item, `mchd-${index + 1}.sig`)
+	}
+
+	return form
+}
+
+function normalizeFormalizedMessageRef(value) {
+	const payload = value && typeof value === 'object' ? value : {}
+	const IdFormalizedMessage = normalizeNullableString(
+		payload.IdFormalizedMessage ?? payload.idFormalizedMessage
+	)
+	const IdExternal = normalizeNullableString(payload.IdExternal ?? payload.idExternal)
+
+	if (!IdFormalizedMessage) {
+		throw new RfmoApiUsageError('IdFormalizedMessage is required')
+	}
+	if (!IdExternal) {
+		throw new RfmoApiUsageError('IdExternal is required')
+	}
+
+	return { IdFormalizedMessage, IdExternal }
+}
+
+function appendBinaryFormPart(form, name, part, defaultFilename) {
+	const { data, filename, contentType } = normalizeBinaryPart(part, defaultFilename)
+	const blob = data instanceof Blob
+		? data
+		: new Blob([data], contentType ? { type: contentType } : undefined)
+	form.append(name, blob, filename)
+}
+
+function normalizeBinaryPart(part, defaultFilename) {
+	if (part instanceof Blob) {
+		return {
+			data: part,
+			filename: part.name || defaultFilename,
+			contentType: part.type || ''
+		}
+	}
+
+	if (Buffer.isBuffer(part) || part instanceof Uint8Array || part instanceof ArrayBuffer) {
+		return {
+			data: part,
+			filename: defaultFilename,
+			contentType: ''
+		}
+	}
+
+	if (part && typeof part === 'object' && part.data) {
+		return {
+			data: part.data,
+			filename: part.filename || defaultFilename,
+			contentType: part.contentType || ''
+		}
+	}
+
+	throw new RfmoApiUsageError(`Invalid binary form part: ${defaultFilename}`)
+}
+
+function asArray(value) {
+	if (value == null) return []
+	return Array.isArray(value) ? value : [value]
 }
 
 function normalizeNullableString(value) {
@@ -297,6 +396,9 @@ async function writeEnvelope({
 
 export {
 	TOKEN_CACHE_KEY,
+	buildTokenCacheKey,
+	normalizeContour,
+	buildMethodPath,
 	request,
 	buildBaseUrl,
 	buildUrl,
@@ -306,6 +408,8 @@ export {
 	normalizeTokenResponse,
 	normalizeCatalogResponse,
 	normalizeId,
+	buildFormalizedMessageForm,
+	normalizeFormalizedMessageRef,
 	isRetryableHttpStatus,
 	isRetryableError,
 	safeReadText,

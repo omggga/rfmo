@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
 	buildBaseUrl,
+	buildMethodPath,
+	buildTokenCacheKey,
 	normalizeCatalogResponse,
+	normalizeContour,
 	normalizeId,
 	normalizeTokenResponse,
 	serializeRequestBody
@@ -64,5 +67,16 @@ describe('helper functions', () => {
 		assert.equal(normalizeId(123), '123')
 		assert.equal(normalizeId({ id: ' abc ' }), 'abc')
 		assert.equal(normalizeId({ nope: 'abc' }), null)
+	})
+
+	it('builds test-contur method paths and cache keys', () => {
+		assert.equal(normalizeContour('test-contur'), 'test')
+		assert.equal(buildMethodPath('authenticate', 'test'), 'test-contur/authenticate')
+		assert.equal(
+			buildMethodPath('test-contur/authenticate', 'test'),
+			'test-contur/authenticate'
+		)
+		assert.equal(buildMethodPath('/authenticate', 'prod'), 'authenticate')
+		assert.equal(buildTokenCacheKey('test'), 'rfmo:auth:token:test-contur')
 	})
 })

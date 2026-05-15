@@ -7,6 +7,7 @@ function toBool(value) {
 function loadConfig(env = process.env) {
 	return {
 		rfmo: {
+			contour: env.RFMO_CONTOUR || 'prod',
 			protocol: env.RFMO_MTLS_PROTOCOL || 'http',
 			host: env.RFMO_MTLS_HOST || 'localhost',
 			port: env.RFMO_MTLS_PORT === '' ? '' : Number(env.RFMO_MTLS_PORT || 3010),

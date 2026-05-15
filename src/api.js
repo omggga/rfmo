@@ -2,17 +2,21 @@ import nodePath from 'node:path'
 import config from './config.js'
 import { RfmoApiHttpError, RfmoApiUsageError } from './errors.js'
 import {
-	TOKEN_CACHE_KEY,
 	buildBaseUrl,
 	buildErrorResponseEnvelope,
+	buildFormalizedMessageForm,
 	buildHeaders,
 	buildHttpResponseEnvelope,
+	buildMethodPath,
 	buildRequestEnvelope,
 	buildSuccessResponseEnvelope,
+	buildTokenCacheKey,
 	buildUrl,
 	isRetryableError,
 	isRetryableHttpStatus,
 	normalizeCatalogResponse,
+	normalizeContour,
+	normalizeFormalizedMessageRef,
 	normalizeId,
 	normalizeTokenResponse,
 	parseResponseByType,
@@ -27,6 +31,7 @@ class RfmoApi {
 		this.cache = options.cache || new Map()
 		this.request = options.requestFn || request
 		this.rfmo = { ...config.rfmo, ...(options.rfmo || {}) }
+		this.contour = normalizeContour(options.contour || this.rfmo.contour)
 		this.baseUrl = buildBaseUrl(this.rfmo)
 		this.token = options.token || this._readCachedToken()
 		this.captureEnvelopes = Boolean(this.rfmo.captureEnvelopes)
@@ -63,6 +68,15 @@ class RfmoApi {
 		return token
 	}
 
+	async getCurrentTe2Catalog() {
+		const payload = await this.call('suspect-catalogs/current-te2-catalog')
+		return normalizeCatalogResponse(payload)
+	}
+
+	async getTe2File(idOrIdXml) {
+		return this._requestFileById('suspect-catalogs/current-te2-file', idOrIdXml)
+	}
+
 	async getCurrentTe21Catalog() {
 		const payload = await this.call('suspect-catalogs/current-te21-catalog')
 		return normalizeCatalogResponse(payload)
@@ -95,6 +109,38 @@ class RfmoApi {
 		return this._requestFileById('suspect-catalogs/current-un-file', idOrIdXml)
 	}
 
+	async sendFormalizedMessage(parts) {
+		return this.call('formalized-message/send', {
+			contentType: null,
+			responseType: 'json',
+			body: buildFormalizedMessageForm(parts)
+		})
+	}
+
+	async sendFormalizedMessageWithMchd(parts) {
+		return this.call('formalized-message/send-with-mchd', {
+			contentType: null,
+			responseType: 'json',
+			body: buildFormalizedMessageForm(parts)
+		})
+	}
+
+	async checkFormalizedMessageStatus(ref) {
+		return this.call('formalized-message/check-status', {
+			contentType: 'application/json',
+			responseType: 'json',
+			body: normalizeFormalizedMessageRef(ref)
+		})
+	}
+
+	async getFormalizedMessageTicket(ref) {
+		return this.call('formalized-message/get-ticket', {
+			contentType: 'application/json',
+			responseType: 'binary',
+			body: normalizeFormalizedMessageRef(ref)
+		})
+	}
+
 	async call(methodPath, options = {}) {
 		const {
 			body,
@@ -106,6 +152,7 @@ class RfmoApi {
 		const retryAttempts = Number(this.rfmo.retryAttempts ?? 2)
 		const timeoutMs = Number(this.rfmo.timeoutMs ?? 60_000)
 		const retryLimit = Math.max(0, retryAttempts)
+		const resolvedMethodPath = buildMethodPath(methodPath, this.contour)
 		let reloginDone = false
 		let retriesUsed = 0
 		let attempt = 0
@@ -118,7 +165,7 @@ class RfmoApi {
 					await this.authenticate()
 				}
 
-				const url = buildUrl(this.baseUrl, methodPath)
+				const url = buildUrl(this.baseUrl, resolvedMethodPath)
 				const headers = buildHeaders(auth, contentType, this.token)
 				const serializedBody = serializeRequestBody(body, contentType)
 				const reqOptions = {
@@ -127,7 +174,7 @@ class RfmoApi {
 					body: serializedBody
 				}
 				requestEnvelope = buildRequestEnvelope({
-					methodPath,
+					methodPath: resolvedMethodPath,
 					url,
 					attempt,
 					headers,
@@ -139,7 +186,7 @@ class RfmoApi {
 
 				if (auth && (response.status === 401 || response.status === 403) && !reloginDone) {
 					const responseBody = await safeReadText(response)
-					await this._writeEnvelope(methodPath, requestEnvelope, buildHttpResponseEnvelope(response, responseBody))
+					await this._writeEnvelope(resolvedMethodPath, requestEnvelope, buildHttpResponseEnvelope(response, responseBody))
 					reloginDone = true
 					await this.authenticate(true)
 					continue
@@ -147,8 +194,8 @@ class RfmoApi {
 
 				if (!response.ok) {
 					const responseBody = await safeReadText(response)
-					await this._writeEnvelope(methodPath, requestEnvelope, buildHttpResponseEnvelope(response, responseBody))
-					const httpError = new RfmoApiHttpError(methodPath, url, response, responseBody)
+					await this._writeEnvelope(resolvedMethodPath, requestEnvelope, buildHttpResponseEnvelope(response, responseBody))
+					const httpError = new RfmoApiHttpError(resolvedMethodPath, url, response, responseBody)
 					if (retriesUsed < retryLimit && isRetryableHttpStatus(response.status)) {
 						retriesUsed += 1
 						continue
@@ -157,11 +204,11 @@ class RfmoApi {
 				}
 
 				const payload = await parseResponseByType(response, responseType)
-				await this._writeEnvelope(methodPath, requestEnvelope, buildSuccessResponseEnvelope(response, payload, responseType))
+				await this._writeEnvelope(resolvedMethodPath, requestEnvelope, buildSuccessResponseEnvelope(response, payload, responseType))
 				return payload
 			} catch (err) {
 				if (!(err instanceof RfmoApiHttpError)) {
-					await this._writeEnvelope(methodPath, requestEnvelope, buildErrorResponseEnvelope(err))
+					await this._writeEnvelope(resolvedMethodPath, requestEnvelope, buildErrorResponseEnvelope(err))
 				}
 				if (retriesUsed < retryLimit && isRetryableError(err)) {
 					retriesUsed += 1
@@ -201,12 +248,12 @@ class RfmoApi {
 
 	_readCachedToken() {
 		if (typeof this.cache?.get !== 'function') return null
-		return this.cache.get(TOKEN_CACHE_KEY) || null
+		return this.cache.get(buildTokenCacheKey(this.contour)) || null
 	}
 
 	_writeCachedToken(token) {
 		if (typeof this.cache?.set !== 'function') return
-		this.cache.set(TOKEN_CACHE_KEY, token)
+		this.cache.set(buildTokenCacheKey(this.contour), token)
 	}
 }
 
