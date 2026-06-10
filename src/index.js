@@ -1,4 +1,5 @@
 export { default as RfmoApi } from './api.js'
+export { default as FedsfmPortalNotifications } from './portal-notifications.js'
 export { RfmoApiHttpError, RfmoApiUsageError } from './errors.js'
 export {
 	buildBaseUrl,

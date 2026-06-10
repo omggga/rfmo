@@ -18,6 +18,16 @@ function loadConfig(env = process.env) {
 			retryAttempts: Number(env.RFMO_API_RETRY_ATTEMPTS || 2),
 			captureEnvelopes: toBool(env.RFMO_CAPTURE_ENVELOPES),
 			envelopesDir: env.RFMO_ENVELOPES_DIR || ''
+		},
+		fedsfmPortal: {
+			origin: env.FEDSFMPORTAL_ORIGIN || 'https://portal.fedsfm.ru',
+			login: env.FEDSFMPORTAL_LOGIN || env.RFMO_API_USERNAME || '',
+			password: env.FEDSFMPORTAL_PASSWORD || env.RFMO_API_PASSWORD || '',
+			pageSize: Number(env.FEDSFMPORTAL_NOTIFICATIONS_PAGE_SIZE || 100),
+			tlsVerify: env.FEDSFMPORTAL_TLS_VERIFY === undefined
+				? true
+				: toBool(env.FEDSFMPORTAL_TLS_VERIFY),
+			maxAckPasses: Number(env.FEDSFMPORTAL_NOTIFICATIONS_ACK_PASSES || 5)
 		}
 	}
 }

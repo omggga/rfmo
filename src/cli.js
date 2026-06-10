@@ -2,9 +2,11 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import nodePath from 'node:path'
 import RfmoApi from './api.js'
+import FedsfmPortalNotifications from './portal-notifications.js'
 
 const COMMANDS = new Set([
 	'auth',
+	'ack-notifications',
 	'te2-catalog',
 	'te2-file',
 	'te21-catalog',
@@ -32,6 +34,10 @@ async function main(argv) {
 	const api = new RfmoApi()
 
 	switch (command) {
+		case 'ack-notifications': {
+			const acknowledged = await new FedsfmPortalNotifications().acknowledgeAllUnread()
+			return printJson({ acknowledged })
+		}
 		case 'auth': {
 			const token = await api.authenticate(true)
 			console.log(JSON.stringify({ accessToken: token }, null, 2))
@@ -102,6 +108,7 @@ async function readBinaryPart(path) {
 
 function printUsage() {
 	console.error(`Usage:
+  node src/cli.js ack-notifications
   node src/cli.js auth
   node src/cli.js te2-catalog
   node src/cli.js te2-file <idXml> [output.zip]

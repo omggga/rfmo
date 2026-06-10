@@ -8,6 +8,7 @@ Small standalone Node.js client for RFMO API calls through an mTLS gateway.
 - Docker image based on `node:24.15.0-bookworm-slim`.
 - `RfmoApi` client with token caching, retries, binary downloads, and optional
   request/response envelope capture.
+- Portal notification client that acknowledges all unread notifications.
 - CLI example for manual RFMO calls.
 - Unit tests with mocked HTTP responses only.
 
@@ -42,8 +43,9 @@ npm install
 npm test
 ```
 
-The package has no runtime dependencies. It uses Node.js built-in `fetch`,
-`AbortController`, `URLSearchParams`, and `node:test`.
+The package uses Node.js built-in `fetch`, `AbortController`,
+`URLSearchParams`, and `node:test`. Cookie handling for the RFMO portal uses
+`fetch-cookie` and `tough-cookie`.
 
 ## Configuration
 
@@ -64,6 +66,11 @@ RFMO_API_TIMEOUT_MS=60000
 RFMO_API_RETRY_ATTEMPTS=2
 RFMO_CAPTURE_ENVELOPES=0
 RFMO_ENVELOPES_DIR=./rfmo-envelopes
+
+FEDSFMPORTAL_LOGIN=your-portal-login
+FEDSFMPORTAL_PASSWORD=your-portal-password
+FEDSFMPORTAL_ORIGIN=https://portal.fedsfm.ru
+FEDSFMPORTAL_TLS_VERIFY=1
 ```
 
 Do not commit real RFMO credentials, private keys, certificates, PINs, or real
@@ -77,6 +84,7 @@ Node.js can load the env file directly:
 node --env-file=.env src/cli.js te21-catalog
 node --env-file=.env src/cli.js mvk-catalog
 node --env-file=.env src/cli.js un-catalog
+node --env-file=.env src/cli.js ack-notifications
 ```
 
 For the test contour, set `RFMO_CONTOUR=test`. The client will call
@@ -133,6 +141,21 @@ const api = new RfmoApi()
 const catalog = await api.getCurrentTe21Catalog()
 const fileZip = await api.getTe21File(catalog.idXml)
 ```
+
+Acknowledging portal notifications uses a separate cookie-based portal client.
+It falls back to `RFMO_API_USERNAME` and `RFMO_API_PASSWORD` when the dedicated
+portal credentials are not set:
+
+```js
+import { FedsfmPortalNotifications } from '@omggga/rfmo'
+
+const notifications = new FedsfmPortalNotifications()
+const acknowledged = await notifications.acknowledgeAllUnread()
+```
+
+TLS certificate verification is enabled by default. Only set
+`FEDSFMPORTAL_TLS_VERIFY=0` in a controlled environment where disabling TLS
+verification is explicitly required.
 
 Test contour:
 
